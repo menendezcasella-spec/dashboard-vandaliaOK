@@ -306,7 +306,7 @@ function filtrarPorFecha(rows, desde, hasta) {
 
 // Totales desde raw_campañas (una fila por campaña, período completo)
 function calcTotals(rows) {
-  const t = {spend:0,alcance:0,impresiones:0,clicks:0,mensajes:0,leads:0,carritos:0,ventas:0,roas_sum:0,_w:0,_ctr:0,_cpm:0,_frec:0};
+  const t = {spend:0,alcance:0,impresiones:0,clicks:0,mensajes:0,leads:0,carritos:0,ventas:0,revenue:0,roas_sum:0,roas:0,_w:0,_ctr:0,_cpm:0,_frec:0};
   rows.forEach(r => {
     const imp  = parseI(r.impresiones_total);
     const gas  = parseN(r.gasto_acumulado);
@@ -318,21 +318,20 @@ function calcTotals(rows) {
     t.leads       += parseI(r.leads_total);
     t.carritos    += parseI(r.carritos_total);
     t.ventas      += parseI(r.ventas_total);
-    // ROAS ponderado por gasto (roas_prom ya viene calculado por Meta)
+    t.revenue     += parseN(r.revenue_total||'0');
+    // ROAS ponderado por gasto
     t.roas_sum    += parseN(r.roas_prom) * gas;
     t._w          += imp;
     t._ctr        += parseN(r.ctr_prom) * imp;
     t._cpm        += parseN(r.cpm_prom) * imp;
     t._frec       += parseN(r.frecuencia_prom) * imp;
   });
-  // ROAS promedio ponderado por gasto
   t.roas = t.spend > 0 ? t.roas_sum / t.spend : 0;
   return t;
 }
 
 // Totales desde raw_diario (un registro por día) — para filtros de fecha personalizados
 function calcTotalsFromDiario(diario, campanas, desde, hasta) {
-  // Filtrar días del período
   const rows = diario.filter(r => {
     const f = r.fecha||r.date_start||'';
     if(!f) return false;
@@ -341,26 +340,28 @@ function calcTotalsFromDiario(diario, campanas, desde, hasta) {
     return true;
   });
 
-  const t = {spend:0,alcance:0,impresiones:0,clicks:0,mensajes:0,leads:0,carritos:0,ventas:0,_w:0,_ctr:0,_cpm:0,_frec:0};
+  const t = {spend:0,alcance:0,impresiones:0,clicks:0,mensajes:0,leads:0,carritos:0,ventas:0,revenue:0,roas_sum:0,roas:0,_w:0,_ctr:0,_cpm:0,_frec:0};
   rows.forEach(r => {
     const imp = parseI(r.impresiones);
-    t.spend       += parseN(r.gasto);
+    const gas = parseN(r.gasto);
+    t.spend       += gas;
     t.impresiones += imp;
     t.clicks      += parseI(r.clicks);
     t.mensajes    += parseI(r.mensajes);
     t.leads       += parseI(r.leads);
     t.carritos    += parseI(r.carritos);
     t.ventas      += parseI(r.ventas);
+    t.revenue     += parseN(r.revenue||'0');
+    t.roas_sum    += parseN(r.roas||'0') * gas;
     t._w          += imp;
     t._ctr        += parseN(r.ctr) * imp;
     t._cpm        += parseN(r.cpm) * imp;
     t._frec       += parseN(r.frecuencia) * imp;
   });
 
-  // Alcance: no se puede sumar por día, tomamos de campañas como referencia
-  // (Meta calcula reach único — la suma diaria lo infla)
+  t.roas = t.spend > 0 ? t.roas_sum / t.spend : 0;
+  // Alcance no se suma por día — usar campañas
   t.alcance = calcTotals(campanas).alcance;
-
   return t;
 }
 
@@ -381,24 +382,25 @@ function renderKpis(rows, totalsOverride) {
   const roas    = t.roas || 0;
 
   const all = {
-    gasto:        {label:'GASTO',       value:fmtPeso(t.spend),              sub:'inversión total',      h:false},
-    alcance:      {label:'ALCANCE',     value:fmt(t.alcance),                sub:'personas únicas',      h:false},
-    impresiones:  {label:'IMPRESIONES', value:fmt(t.impresiones),            sub:'veces mostrado',       h:false},
-    frecuencia:   {label:'FRECUENCIA',  value:frec>0?frec.toFixed(1)+'x':'—',sub:'prom. por persona',   h:false},
-    clicks:       {label:'CLICKS',      value:fmt(t.clicks),                 sub:'clics totales',        h:false},
-    ctr:          {label:'CTR',         value:fmtPct(ctr),                   sub:'tasa de click',        h:false},
-    cpm:          {label:'CPM',         value:fmtPeso(cpm),                  sub:'costo x mil imp.',     h:false},
-    mensajes:     {label:'MENSAJES',    value:fmt(t.mensajes),               sub:'conversaciones',       h:true},
-    costo_mensaje:{label:'COSTO/MSJ',  value:fmtPeso(cpm_msg),              sub:'por conversación',     h:true},
-    leads:        {label:'LEADS',       value:fmt(t.leads),                  sub:'clientes potenciales', h:true},
-    costo_lead:   {label:'COSTO/LEAD', value:fmtPeso(cpl),                  sub:'por lead',             h:true},
-    ventas:       {label:'VENTAS',      value:fmt(t.ventas),                 sub:'conversiones',         h:true},
-    roas:         {label:'ROAS',        value:roas>0?roas.toFixed(2)+'x':'—',sub:'retorno s/ inv.',     h:true},
+    gasto:        {label:'GASTO',         value:fmtPeso(t.spend),              sub:'inversión total',        h:false},
+    alcance:      {label:'ALCANCE',       value:fmt(t.alcance),                sub:'personas únicas',        h:false},
+    impresiones:  {label:'IMPRESIONES',   value:fmt(t.impresiones),            sub:'veces mostrado',         h:false},
+    frecuencia:   {label:'FRECUENCIA',    value:frec>0?frec.toFixed(1)+'x':'—',sub:'prom. por persona',     h:false},
+    clicks:       {label:'CLICKS',        value:fmt(t.clicks),                 sub:'clics totales',          h:false},
+    ctr:          {label:'CTR',           value:fmtPct(ctr),                   sub:'tasa de click',          h:false},
+    cpm:          {label:'CPM',           value:fmtPeso(cpm),                  sub:'costo x mil imp.',       h:false},
+    mensajes:     {label:'MENSAJES',      value:fmt(t.mensajes),               sub:'conversaciones',         h:true},
+    costo_mensaje:{label:'COSTO/MSJ',    value:fmtPeso(cpm_msg),              sub:'por conversación',       h:true},
+    leads:        {label:'LEADS',         value:fmt(t.leads),                  sub:'clientes potenciales',   h:true},
+    costo_lead:   {label:'COSTO/LEAD',   value:fmtPeso(cpl),                  sub:'por lead',               h:true},
+    ventas:       {label:'VENTAS',        value:fmt(t.ventas),                 sub:'conversiones',           h:true},
+    revenue:      {label:'INGRESOS',      value:fmtPeso(t.revenue),            sub:'valor total de ventas',  h:true},
+    roas:         {label:'ROAS',          value:roas>0?roas.toFixed(2)+'x':'—',sub:'retorno s/ inversión',  h:true},
   };
 
   // Métricas base según objetivo declarado por Meta
   let metricKeys = [...getMetrics(obj)];
-  // Si hay mensajes reales, mostrarlos siempre (Meta clasifica campañas de WhatsApp como SALES/ENGAGEMENT)
+  // Si hay mensajes reales, mostrarlos siempre
   if(t.mensajes>0 && !metricKeys.includes('mensajes')) {
     metricKeys.push('mensajes');
     metricKeys.push('costo_mensaje');
@@ -408,15 +410,20 @@ function renderKpis(rows, totalsOverride) {
     metricKeys.push('leads');
     metricKeys.push('costo_lead');
   }
+  // Si hay revenue, agregar antes del ROAS
+  if(t.revenue>0 && !metricKeys.includes('revenue')) {
+    metricKeys.push('revenue');
+  }
   const show = metricKeys
     .filter(k=>all[k])
     .filter(k=>{
-      if(k==='mensajes'      && t.mensajes===0) return false;
-      if(k==='costo_mensaje' && t.mensajes===0) return false;
-      if(k==='leads'         && t.leads===0)    return false;
-      if(k==='costo_lead'    && t.leads===0)    return false;
-      if(k==='ventas'        && t.ventas===0)   return false;
-      if(k==='roas'          && roas===0)        return false;
+      if(k==='mensajes'      && t.mensajes===0)  return false;
+      if(k==='costo_mensaje' && t.mensajes===0)  return false;
+      if(k==='leads'         && t.leads===0)     return false;
+      if(k==='costo_lead'    && t.leads===0)     return false;
+      if(k==='ventas'        && t.ventas===0)    return false;
+      if(k==='revenue'       && t.revenue===0)   return false;
+      if(k==='roas'          && roas===0)         return false;
       return true;
     })
     .map(k=>all[k]);
